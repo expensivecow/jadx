@@ -51,6 +51,7 @@ public class ConditionGen extends InsnGen {
 
 	private void add(CodeWriter code, CondStack stack, IfCondition condition) throws CodegenException {
 		stack.push(condition);
+		
 		switch (condition.getMode()) {
 			case COMPARE:
 				addCompare(code, stack, condition.getCompare());
@@ -98,6 +99,7 @@ public class ConditionGen extends InsnGen {
 	}
 
 	private void addCompare(CodeWriter code, CondStack stack, Compare compare) throws CodegenException {
+		
 		IfOp op = compare.getOp();
 		InsnArg firstArg = compare.getA();
 		InsnArg secondArg = compare.getB();
@@ -124,7 +126,9 @@ public class ConditionGen extends InsnGen {
 			}
 			ErrorsCounter.methodError(mth, "Unsupported boolean condition " + op.getSymbol());
 		}
-
+		if (mgen.getMethodNode().getMethodInfo().getFullName().contains("getBreadCrumbTitle")) {
+			System.out.println("HELLO ");
+		}
 		addArg(code, firstArg, isArgWrapNeeded(firstArg));
 		code.add(' ').add(op.getSymbol()).add(' ');
 		addArg(code, secondArg, isArgWrapNeeded(secondArg));

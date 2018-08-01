@@ -11,8 +11,12 @@ public class JadxCLI {
 
 	public static void main(String[] args) {
 		try {
+			String[] arguments = new String[2];
+			arguments[0] = "/home/mike/Dev/School/Research/LogicBombs/test/SmsReminder.apk";//"/home/mike/Dev/School/Research/LogicBombs/test/0c67d0919e574a6876c73118260368ee.apk";
+			arguments[1] = "--no-replace-consts";
+			
 			JadxCLIArgs jadxArgs = new JadxCLIArgs();
-			if (jadxArgs.processArgs(args)) {
+			if (jadxArgs.processArgs(arguments)) {
 				processAndSave(jadxArgs);
 			}
 		} catch (Exception e) {
@@ -30,6 +34,7 @@ public class JadxCLI {
 			System.exit(1);
 		}
 		jadx.save();
+		
 		if (jadx.getErrorsCount() != 0) {
 			jadx.printErrorsReport();
 			LOG.error("finished with errors");

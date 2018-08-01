@@ -1,5 +1,6 @@
 package jadx.core.codegen;
 
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -16,6 +17,7 @@ import jadx.core.dex.instructions.InsnType;
 import jadx.core.dex.instructions.args.ArgType;
 import jadx.core.dex.instructions.args.RegisterArg;
 import jadx.core.dex.instructions.args.SSAVar;
+import jadx.core.dex.nodes.IBlock;
 import jadx.core.dex.nodes.InsnNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.trycatch.CatchAttr;

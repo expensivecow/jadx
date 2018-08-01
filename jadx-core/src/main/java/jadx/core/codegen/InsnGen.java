@@ -227,7 +227,7 @@ public class InsnGen {
 		}
 		return true;
 	}
-
+	
 	private void makeInsnBody(CodeWriter code, InsnNode insn, Set<Flags> state) throws CodegenException {
 		switch (insn.getType()) {
 			case CONST_STR:
@@ -519,6 +519,7 @@ public class InsnGen {
 				throw new CodegenException(mth, "Unknown instruction: " + insn.getType());
 		}
 	}
+	
 
 	private void oneArgInsn(CodeWriter code, InsnNode insn, Set<Flags> state, char op) throws CodegenException {
 		boolean wrap = state.contains(Flags.BODY_ONLY);

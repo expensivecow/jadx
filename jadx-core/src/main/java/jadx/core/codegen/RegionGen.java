@@ -1,5 +1,6 @@
 package jadx.core.codegen;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -33,6 +34,8 @@ import jadx.core.dex.regions.loops.ForLoop;
 import jadx.core.dex.regions.loops.LoopRegion;
 import jadx.core.dex.regions.loops.LoopType;
 import jadx.core.dex.trycatch.ExceptionHandler;
+import jadx.core.statistics.FeatureAnalysis;
+import jadx.core.statistics.IfRegionInfo;
 import jadx.core.utils.ErrorsCounter;
 import jadx.core.utils.RegionUtils;
 import jadx.core.utils.exceptions.CodegenException;
@@ -40,9 +43,15 @@ import jadx.core.utils.exceptions.JadxRuntimeException;
 
 public class RegionGen extends InsnGen {
 	private static final Logger LOG = LoggerFactory.getLogger(RegionGen.class);
-
+	private List<IBlock> blocks;
+	private List<IfRegionInfo> ifRegionInfo;
+	private int numNestedIfConditions;
+	
 	public RegionGen(MethodGen mgen) {
 		super(mgen, false);
+		blocks = new ArrayList<IBlock>();
+		ifRegionInfo = new ArrayList<IfRegionInfo>();
+		numNestedIfConditions = 0;
 	}
 
 	public void makeRegion(CodeWriter code, IContainer cont) throws CodegenException {
@@ -54,6 +63,10 @@ public class RegionGen extends InsnGen {
 			} else {
 				declareVars(code, cont);
 				if (cont instanceof IfRegion) {
+					if (mgen.getMethodNode().getMethodInfo().getFullName().contains("getBreadCrumbTitle")) {
+						IfRegion ifRegion = (IfRegion) cont;
+						FeatureAnalysis.getInstance().addStatistic(mgen, ifRegion, this);
+					}
 					makeIf((IfRegion) cont, code, true);
 				} else if (cont instanceof SwitchRegion) {
 					makeSwitch((SwitchRegion) cont, code);
@@ -69,7 +82,185 @@ public class RegionGen extends InsnGen {
 			throw new CodegenException("Not processed container: " + cont);
 		}
 	}
+	
+	public List<IBlock> getBlocksForRegion(IContainer cont) throws CodegenException {
+		blocks.clear();
+		traverseRegion(cont);
+		return blocks;
+	}
+	
+	public int getNumNestedIfConditions(IContainer cont) throws CodegenException {
+		numNestedIfConditions = 0;
+		traverseRegion(cont);
+		return numNestedIfConditions;
+	}
+	
+	public void traverseRegion(IContainer cont) throws CodegenException {
+		if (cont instanceof IBlock) {
+			blocks.add((IBlock) cont);
+			IBlock block = (IBlock) cont;
+		} else if (cont instanceof IRegion) {
+			if (cont instanceof Region) {
+				Region region = (Region) cont;
+				for (IContainer c : region.getSubBlocks()) {
+					traverseRegion(c);
+				}
+			} else {
+				if (cont instanceof IfRegion) {
+					numNestedIfConditions++;
+					traverseIf((IfRegion) cont, true);
+				} else if (cont instanceof SwitchRegion) {
+					traverseSwitch((SwitchRegion) cont);
+				} else if (cont instanceof LoopRegion) {
+					traverseLoop((LoopRegion) cont);
+				} else if (cont instanceof TryCatchRegion) {
+					traverseTryCatch((TryCatchRegion) cont);
+				} else if (cont instanceof SynchronizedRegion) {
+					traverseSynchronizedRegion((SynchronizedRegion) cont);
+				}
+			}
+		} else {
+			throw new CodegenException("Not processed container: " + cont);
+		}
+	}
+	
+	public void traverseIf(IfRegion region, boolean newLine) throws CodegenException {
+		traverseRegion(region.getThenRegion());
 
+		IContainer els = region.getElseRegion();
+		if (els != null && RegionUtils.notEmpty(els)) {
+			if (traverseElseIf(els)) {
+				return;
+			}
+			traverseRegion(els);
+		}
+	}
+
+	private boolean traverseElseIf(IContainer els) throws CodegenException {
+		if (els.contains(AFlag.ELSE_IF_CHAIN) && els instanceof Region) {
+			List<IContainer> subBlocks = ((Region) els).getSubBlocks();
+			if (subBlocks.size() == 1) {
+				IContainer elseBlock = subBlocks.get(0);
+				if (elseBlock instanceof IfRegion) {
+					traverseIf((IfRegion) elseBlock, false);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	
+	public List<IfRegionInfo> getIfRegionInfo(IfRegion region) throws CodegenException {
+		ifRegionInfo.clear();
+		getRelevantIfRegions(region);
+		return ifRegionInfo;
+	}
+	
+	public void getRelevantIfRegions(IfRegion region) throws CodegenException {
+		IContainer els = region.getElseRegion();
+		if (els != null && RegionUtils.notEmpty(els)) {
+			if (getRelatedIfRegionsInternal(els)) {
+				return;
+			}
+			else {
+				ifRegionInfo.add(new IfRegionInfo(null, els, true));
+			}
+		}
+		return;
+	}
+
+	private boolean getRelatedIfRegionsInternal(IContainer els) throws CodegenException {
+		if (els.contains(AFlag.ELSE_IF_CHAIN) && els instanceof Region) {
+			List<IContainer> subBlocks = ((Region) els).getSubBlocks();
+			if (subBlocks.size() == 1) {
+				IContainer elseBlock = subBlocks.get(0);
+				if (elseBlock instanceof IfRegion) {
+					ifRegionInfo.add(new IfRegionInfo(((IfRegion) elseBlock).getCondition(), elseBlock, false));
+					getRelevantIfRegions((IfRegion) elseBlock);
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	
+	
+
+	private void traverseSwitch(SwitchRegion sw) throws CodegenException {
+		int size = sw.getKeys().size();
+		for (int i = 0; i < size; i++) {
+			IContainer c = sw.getCases().get(i);
+			traverseRegion(c);
+		}
+		if (sw.getDefaultCase() != null) {
+			traverseRegion(sw.getDefaultCase());
+		}
+	}
+
+
+	private void traverseLoop(LoopRegion region) throws CodegenException {
+		IfCondition condition = region.getCondition();
+		if (condition == null) {
+			// infinite loop
+			traverseRegion(region.getBody());
+			return;
+		}
+		LoopType type = region.getType();
+		if (type != null) {
+			if (type instanceof ForLoop) {
+				traverseRegion(region.getBody());
+				return;
+			}
+			if (type instanceof ForEachLoop) {
+				traverseRegion(region.getBody());
+				return;
+			}
+			throw new JadxRuntimeException("Unknown loop type: " + type.getClass());
+		}
+		if (region.isConditionAtEnd()) {
+			traverseRegion(region.getBody());
+		} else {
+			traverseRegion(region.getBody());
+		}
+		return;
+	}
+	
+	private void traverseTryCatch(TryCatchRegion region) throws CodegenException {
+		traverseRegion(region.getTryRegion());
+		// TODO: move search of 'allHandler' to 'TryCatchRegion'
+		ExceptionHandler allHandler = null;
+		for (Map.Entry<ExceptionHandler, IContainer> entry : region.getCatchRegions().entrySet()) {
+			ExceptionHandler handler = entry.getKey();
+			if (handler.isCatchAll()) {
+				if (allHandler != null) {
+					LOG.warn("Several 'all' handlers in try/catch block in {}", mth);
+				}
+				allHandler = handler;
+			} else {
+				traverseCatchBlock(handler);
+			}
+		}
+		if (allHandler != null) {
+			traverseCatchBlock(allHandler);
+		}
+		IContainer finallyRegion = region.getFinallyRegion();
+		if (finallyRegion != null) {
+			traverseRegion(finallyRegion);
+		}
+	}
+	
+	private void traverseCatchBlock(ExceptionHandler handler) throws CodegenException {
+		IContainer region = handler.getHandlerRegion();
+		if (region == null) {
+			return;
+		}
+		traverseRegion(region);
+	}
+	
+	private void traverseSynchronizedRegion(SynchronizedRegion cont) throws CodegenException {
+		traverseRegion(cont.getRegion());
+	}
+	
 	private void declareVars(CodeWriter code, IContainer cont) {
 		DeclareVariablesAttr declVars = cont.get(AType.DECLARE_VARIABLES);
 		if (declVars != null) {
