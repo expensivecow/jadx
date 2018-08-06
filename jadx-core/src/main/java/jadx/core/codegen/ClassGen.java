@@ -433,8 +433,6 @@ public class ClassGen {
 			code.add(stype.getLongName());
 		}
 	}
-
-
 	
 	public void useClass(CodeWriter code, ArgType type) {
 		useClass(code, ClassInfo.extCls(cls.root(), type));
@@ -471,8 +469,13 @@ public class ClassGen {
 		String baseClass = useClassInternal(cls.getAlias(), classInfo.getAlias());
 		code.add(baseClass);
 	}
+	
+	public String useClass(ClassInfo classInfo) {
+		String baseClass = useClassInternal(cls.getAlias(), classInfo.getAlias());
+		return baseClass;
+	}
 
-	private String useClassInternal(ClassInfo useCls, ClassInfo extClsInfo) {
+	public String useClassInternal(ClassInfo useCls, ClassInfo extClsInfo) {
 		String fullName = extClsInfo.getFullName();
 		if (fallback || !useImports) {
 			return fullName;

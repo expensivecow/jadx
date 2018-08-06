@@ -126,9 +126,7 @@ public class ConditionGen extends InsnGen {
 			}
 			ErrorsCounter.methodError(mth, "Unsupported boolean condition " + op.getSymbol());
 		}
-		if (mgen.getMethodNode().getMethodInfo().getFullName().contains("getBreadCrumbTitle")) {
-			System.out.println("HELLO ");
-		}
+		
 		addArg(code, firstArg, isArgWrapNeeded(firstArg));
 		code.add(' ').add(op.getSymbol()).add(' ');
 		addArg(code, secondArg, isArgWrapNeeded(secondArg));

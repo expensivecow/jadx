@@ -63,7 +63,7 @@ public class RegionGen extends InsnGen {
 			} else {
 				declareVars(code, cont);
 				if (cont instanceof IfRegion) {
-					if (mgen.getMethodNode().getMethodInfo().getFullName().contains("getBreadCrumbTitle")) {
+					if (mgen.getMethodNode().getMethodInfo().getFullName().contains("onPreparePanel")) {
 						IfRegion ifRegion = (IfRegion) cont;
 						FeatureAnalysis.getInstance().addStatistic(mgen, ifRegion, this);
 					}
@@ -98,7 +98,6 @@ public class RegionGen extends InsnGen {
 	public void traverseRegion(IContainer cont) throws CodegenException {
 		if (cont instanceof IBlock) {
 			blocks.add((IBlock) cont);
-			IBlock block = (IBlock) cont;
 		} else if (cont instanceof IRegion) {
 			if (cont instanceof Region) {
 				Region region = (Region) cont;
@@ -278,6 +277,7 @@ public class RegionGen extends InsnGen {
 			makeRegion(code, c);
 		}
 	}
+	
 
 	public void makeRegionIndent(CodeWriter code, IContainer region) throws CodegenException {
 		code.incIndent();

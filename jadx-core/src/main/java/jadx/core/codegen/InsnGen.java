@@ -47,6 +47,11 @@ import jadx.core.dex.nodes.FieldNode;
 import jadx.core.dex.nodes.InsnNode;
 import jadx.core.dex.nodes.MethodNode;
 import jadx.core.dex.nodes.RootNode;
+import jadx.core.dex.regions.conditions.Compare;
+import jadx.core.dex.regions.conditions.IfCondition;
+import jadx.core.statistics.InsnVariableContainer;
+import jadx.core.statistics.MethodCall;
+import jadx.core.statistics.VariableUsage;
 import jadx.core.utils.ErrorsCounter;
 import jadx.core.utils.RegionUtils;
 import jadx.core.utils.exceptions.CodegenException;
@@ -61,11 +66,10 @@ public class InsnGen {
 	protected final MethodNode mth;
 	protected final RootNode root;
 	protected final boolean fallback;
+	private List<Compare> conditionCompares;
 
 	protected enum Flags {
-		BODY_ONLY,
-		BODY_ONLY_NOWRAP,
-		INLINE
+		BODY_ONLY, BODY_ONLY_NOWRAP, INLINE
 	}
 
 	public InsnGen(MethodGen mgen, boolean fallback) {
@@ -73,6 +77,8 @@ public class InsnGen {
 		this.mth = mgen.getMethodNode();
 		this.root = mth.dex().root();
 		this.fallback = fallback;
+
+		this.conditionCompares = new ArrayList<Compare>();
 	}
 
 	private boolean isFallback() {
@@ -112,6 +118,385 @@ public class InsnGen {
 			throw new CodegenException("Unknown arg type " + arg);
 		}
 	}
+	
+	public void addVariableUsage(InsnVariableContainer variableContainer, boolean isWrite, VariableUsage usage) {
+		if (isWrite) {
+			variableContainer.addWriteUsage(usage);
+		}
+		else {
+			variableContainer.addReadUsage(usage);
+		}
+	}
+	
+	protected boolean getInsnVariables(InsnVariableContainer vc, InsnNode insn, Flags flag) throws CodegenException {
+		try {
+			Set<Flags> state = EnumSet.noneOf(Flags.class);
+			if (flag == Flags.BODY_ONLY || flag == Flags.BODY_ONLY_NOWRAP) {
+				state.add(flag);
+				getInsnReadWriteVariables(vc, insn, state);
+			} else {
+				if (insn.getResult() != null && !insn.contains(AFlag.ARITH_ONEARG)) {
+					getAssignedVariables(vc, insn);
+				}
+				getInsnReadWriteVariables(vc, insn, state);
+			}
+		} catch (Throwable th) {
+			throw new CodegenException(mth, "Error generate insn: " + insn, th);
+		}
+		return true;
+	}
+	
+	//TODO: Modified Region
+	public void getVariableUsageFromArg(boolean isWrite, InsnVariableContainer vc, InsnArg arg, boolean wrap) throws CodegenException {
+		if (arg.isRegister()) {
+			VariableUsage usage = new VariableUsage(arg, mgen.getNameGen().useArg((RegisterArg) arg));
+			addVariableUsage(vc, isWrite, usage);
+		} else if (arg.isLiteral()) {
+			VariableUsage usage = new VariableUsage(arg, lit((LiteralArg) arg));
+			addVariableUsage(vc, isWrite, usage);
+		} else if (arg.isInsnWrap()) {
+			Flags flag = wrap ? Flags.BODY_ONLY : Flags.BODY_ONLY_NOWRAP;
+			getInsnVariables(vc, ((InsnWrapArg) arg).getWrapInsn(), flag);
+		} else if (arg.isNamed()) {
+			VariableUsage usage = new VariableUsage(arg, ((Named) arg).getName());
+			addVariableUsage(vc, isWrite, usage);
+		} else if (arg.isField()) {
+			FieldArg f = (FieldArg) arg;
+			if (f.isStatic()) {
+				CodeWriter staticFieldCode = new CodeWriter();
+
+				staticField(staticFieldCode, f.getField());
+				VariableUsage usage = new VariableUsage(arg, staticFieldCode.toString());
+				addVariableUsage(vc, isWrite, usage);
+			} else {
+				CodeWriter instanceFieldCode = new CodeWriter();
+				instanceField(instanceFieldCode, f.getField(), f.getInstanceArg());
+
+				VariableUsage usage = new VariableUsage(arg, instanceFieldCode.toString());
+				addVariableUsage(vc, isWrite, usage);
+			}
+		} else {
+			throw new CodegenException("Unknown arg type " + arg);
+		}
+	}
+	
+	private void getInsnReadWriteVariables(InsnVariableContainer vc, InsnNode insn, Set<Flags> state) throws CodegenException {
+		VariableUsage u;
+		CodeWriter writer;
+		switch (insn.getType()) {
+		case CONST_STR:
+			writer = new CodeWriter();
+			String str = ((ConstStringNode) insn).getString();
+			writer.add(mth.dex().root().getStringUtils().unescapeString(str));
+			
+			u = new VariableUsage(insn.getArg(0), writer.toString());
+			addVariableUsage(vc, false, u);
+			break;
+
+		case CONST_CLASS:
+			writer = new CodeWriter();
+			ArgType clsType = ((ConstClassNode) insn).getClsType();
+			useType(writer, clsType);
+			writer.add(".class");
+			
+			u = new VariableUsage(insn.getArg(0), writer.toString());
+			addVariableUsage(vc, false, u);
+			break;
+
+		case CONST:
+			LiteralArg arg = (LiteralArg) insn.getArg(0);
+			u = new VariableUsage(arg, lit(arg));
+			addVariableUsage(vc, false, u);
+			break;
+
+		case MOVE:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), false);
+			break;
+
+		case CHECK_CAST:
+		case CAST: {
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+		}
+
+		case ARITH:
+			getArithVariables(vc, (ArithNode) insn, state);
+			break;
+
+		case NEG:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+
+		case NOT:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+
+		case RETURN:
+			if (insn.getArgsCount() != 0) {
+				getVariableUsageFromArg(false, vc, insn.getArg(0), false);
+			}
+			break;
+
+		case BREAK:
+			// No variables being read/written
+			break;
+
+		case CONTINUE:
+			// No variables being read/written
+			break;
+
+		case THROW:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+
+		case CMP_L:
+		case CMP_G:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			getVariableUsageFromArg(false, vc, insn.getArg(1), true);
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			getVariableUsageFromArg(false, vc, insn.getArg(1), true);
+			break;
+
+		case INSTANCE_OF: {
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+		}
+		case CONSTRUCTOR:
+			MethodNode callMth = mth.dex().resolveMethod(((ConstructorInsn) insn).getCallMth());
+			getMethodArgumentVariables(vc, insn, 0, callMth);
+			break;
+
+		case INVOKE:
+			getInvokeVariables(vc, (InvokeNode) insn);
+			break;
+
+		case NEW_ARRAY: {
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+		}
+		
+		case ARRAY_LENGTH:
+			writer = new CodeWriter();
+			addArg(writer, insn.getArg(0));
+			writer.add(".length");
+			
+			u = new VariableUsage(insn.getArg(0), writer.toString());
+			addVariableUsage(vc, false, u);
+			break;
+
+		case FILLED_NEW_ARRAY:
+			int c = insn.getArgsCount();
+			for (int i = 0; i < c; i++) {
+				getVariableUsageFromArg(false, vc, insn.getArg(i), false);
+			}
+			break;
+
+		case AGET:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			getVariableUsageFromArg(false, vc, insn.getArg(1), false);
+			break;
+
+		case APUT:
+			getVariableUsageFromArg(true, vc, insn.getArg(0), true);
+			getVariableUsageFromArg(false, vc, insn.getArg(1), false);
+			getVariableUsageFromArg(false, vc, insn.getArg(2), false);
+			break;
+
+		case IGET: {
+			writer = new CodeWriter();
+			FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
+			instanceField(writer, fieldInfo, insn.getArg(0));
+
+			u = new VariableUsage(insn.getArg(0), writer.toString());
+			addVariableUsage(vc, false, u);
+			break;
+		}
+		case IPUT: {
+			getVariableUsageFromArg(true, vc, insn.getArg(1), true);
+			getVariableUsageFromArg(false, vc, insn.getArg(0), false);
+			break;
+		}
+
+		case SGET:
+			writer = new CodeWriter();
+			staticField(writer, (FieldInfo) ((IndexInsnNode) insn).getIndex());
+
+			u = new VariableUsage(null, writer.toString());
+			addVariableUsage(vc, false, u);
+			break;
+			
+		case SPUT:
+			writer = new CodeWriter();
+			staticField(writer, (FieldInfo) ((IndexInsnNode) insn).getIndex());
+
+			u = new VariableUsage(insn.getArg(0), writer.toString());
+			addVariableUsage(vc, true, u);
+
+			getVariableUsageFromArg(false, vc, insn.getArg(0), false);
+			break;
+
+		case STR_CONCAT:
+			for (Iterator<InsnArg> it = insn.getArguments().iterator(); it.hasNext();) {
+				getVariableUsageFromArg(false, vc, it.next(), true);
+			}
+			break;
+
+		case MONITOR_ENTER:
+			if (isFallback()) {
+				getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			}
+			break;
+
+		case MONITOR_EXIT:
+			if (isFallback()) {
+				getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			}
+			break;
+
+		case TERNARY:
+			TernaryInsn tInsn = (TernaryInsn) insn;
+			
+			InsnArg first = insn.getArg(0);
+			InsnArg second = insn.getArg(1);
+			
+			for (Compare compare : getCompareList(tInsn.getCondition())) {
+				getVariableUsageFromArg(false, vc, compare.getA(), false);
+				getVariableUsageFromArg(false, vc, compare.getB(), false);
+			}
+			
+			// TODO look at variables in the if condition
+			getVariableUsageFromArg(false, vc, first, false);
+			getVariableUsageFromArg(false, vc, second, false);
+		
+			break;
+
+		case ONE_ARG:
+			getVariableUsageFromArg(false, vc, insn.getArg(0), true);
+			break;
+			
+		default:
+			throw new CodegenException(mth, "Unknown instruction: " + insn.getType());
+		}
+	}
+	
+
+	private void getSingleArithVariable(InsnVariableContainer vc, ArithNode insn) throws CodegenException {
+		ArithOp op = insn.getOp();
+		InsnArg arg = insn.getArg(1);
+		// "++" or "--"
+		if (arg.isLiteral() && (op == ArithOp.ADD || op == ArithOp.SUB)) {
+			LiteralArg lit = (LiteralArg) arg;
+			if (lit.isInteger() && lit.getLiteral() == 1) {
+				getAssignedVariables(vc, insn);
+				return;
+			}
+		}
+		// +=, -= ...
+		getAssignedVariables(vc, insn);
+		getVariableUsageFromArg(false, vc, arg, false);
+	}
+	
+	private void getArithVariables(InsnVariableContainer vc, ArithNode insn, Set<Flags> state) throws CodegenException {
+		if (insn.contains(AFlag.ARITH_ONEARG)) {
+			getSingleArithVariable(vc, insn);
+			return;
+		}
+
+		getVariableUsageFromArg(false, vc, insn.getArg(0), false);
+		getVariableUsageFromArg(false, vc, insn.getArg(1), false);
+	}
+	
+	private void getAssignedVariables(InsnVariableContainer vc, InsnNode insn) throws CodegenException {
+		RegisterArg arg = insn.getResult();
+		if (insn.contains(AFlag.DECLARE_VAR)) {
+			VariableUsage usage = new VariableUsage(arg, mgen.getNameGen().assignArg(arg));
+			vc.addWriteUsage(usage);
+		} else {
+			getVariableUsageFromArg(true, vc, arg, false);
+		}
+	}
+	
+
+	void getMethodArgumentVariables(InsnVariableContainer vc, InsnNode insn, int startArgNum, @Nullable MethodNode callMth) throws CodegenException {
+		int k = startArgNum;
+		if (callMth != null && callMth.contains(AFlag.SKIP_FIRST_ARG)) {
+			k++;
+		}
+		int argsCount = insn.getArgsCount();
+		if (k < argsCount) {
+			for (int i = k; i < argsCount; i++) {
+				InsnArg arg = insn.getArg(i);
+				getVariableUsageFromArg(false, vc, arg, false);
+			}
+		}
+	}
+	
+	private void getInvokeVariables(InsnVariableContainer vc, InvokeNode insn) throws CodegenException {
+		MethodInfo callMth = insn.getCallMth();
+		
+		vc.addMethodCall(new MethodCall(callMth, callMth.getDeclClass()));
+		
+		MethodNode callMthNode = mth.root().deepResolveMethod(callMth);
+		if (callMthNode != null) {
+			if (inlineMethod(vc, callMthNode, insn)) {
+				return;
+			}
+			callMth = callMthNode.getMethodInfo();
+		}
+
+		int k = 0;
+		InvokeType type = insn.getInvokeType();
+		switch (type) {
+		case DIRECT:
+		case VIRTUAL:
+		case INTERFACE:
+			k++;
+			break;
+
+		case SUPER:
+			k++;
+			break;
+
+		case STATIC:
+			break;
+		}
+
+		getMethodArgumentVariables(vc, insn, k, callMthNode);
+	}
+
+	// Returns a new list if condition specified is null
+	public List<Compare> getCompareList(IfCondition condition) {
+		if (condition == null)
+			return new ArrayList<Compare>();
+		
+		conditionCompares.clear();
+		traverseCondition(condition);
+		return conditionCompares;
+	}
+	
+	private void traverseCondition(IfCondition condition) {
+		switch (condition.getMode()) {
+		case COMPARE:
+			conditionCompares.add(condition.getCompare());
+			break;
+		case TERNARY:
+			traverseCondition(condition.first());
+			traverseCondition(condition.second());
+			traverseCondition(condition.third());
+			break;
+		case NOT:
+			break;
+		case AND:
+		case OR:
+			for (IfCondition c : condition.getArgs()) {
+				traverseCondition(c);
+			}
+			break;
+
+		default:
+		}
+	}
+	// TODO
 
 	public void assignVar(CodeWriter code, InsnNode insn) throws CodegenException {
 		RegisterArg arg = insn.getResult();
@@ -135,12 +520,49 @@ public class InsnGen {
 		return TypeGen.literalToString(arg.getLiteral(), arg.getType(), mth);
 	}
 
+	private boolean inlineMethod(InsnVariableContainer vc, MethodNode callMthNode, InvokeNode insn) throws CodegenException {
+		MethodInlineAttr mia = callMthNode.get(AType.METHOD_INLINE);
+		if (mia == null) {
+			return false;
+		}
+		InsnNode inl = mia.getInsn();
+		if (callMthNode.getMethodInfo().getArgumentsTypes().isEmpty()) {
+			getInsnVariables(vc, inl, Flags.BODY_ONLY);
+		} else {
+			// remap args
+			InsnArg[] regs = new InsnArg[callMthNode.getRegsCount()];
+			List<RegisterArg> callArgs = callMthNode.getArguments(true);
+			for (int i = 0; i < callArgs.size(); i++) {
+				InsnArg arg = insn.getArg(i);
+				RegisterArg callArg = callArgs.get(i);
+				regs[callArg.getRegNum()] = arg;
+			}
+			// replace args
+			InsnNode inlCopy = inl.copy();
+			List<RegisterArg> inlArgs = new ArrayList<>();
+			inlCopy.getRegisterArgs(inlArgs);
+			for (RegisterArg r : inlArgs) {
+				int regNum = r.getRegNum();
+				if (regNum >= regs.length) {
+					LOG.warn("Unknown register number {} in method call: {} from {}", r, callMthNode, mth);
+				} else {
+					InsnArg repl = regs[regNum];
+					if (repl == null) {
+						LOG.warn("Not passed register {} in method call: {} from {}", r, callMthNode, mth);
+					} else {
+						inlCopy.replaceArg(r, repl);
+					}
+				}
+			}
+			getInsnVariables(vc, inlCopy, Flags.BODY_ONLY);
+		}
+		return true;
+	}
+
 	private void instanceField(CodeWriter code, FieldInfo field, InsnArg arg) throws CodegenException {
 		ClassNode pCls = mth.getParentClass();
 		FieldNode fieldNode = pCls.searchField(field);
-		while (fieldNode == null
-				&& pCls.getParentClass() != pCls
-				&& pCls.getParentClass() != null) {
+		while (fieldNode == null && pCls.getParentClass() != pCls && pCls.getParentClass() != null) {
 			pCls = pCls.getParentClass();
 			fieldNode = pCls.searchField(field);
 		}
@@ -148,21 +570,18 @@ public class InsnGen {
 			FieldReplaceAttr replace = fieldNode.get(AType.FIELD_REPLACE);
 			if (replace != null) {
 				switch (replace.getReplaceType()) {
-					case CLASS_INSTANCE:
-						useClass(code, replace.getClsRef());
-						code.add(".this");
-						break;
-					case VAR:
-						addArg(code, replace.getVarRef());
-						break;
+				case CLASS_INSTANCE:
+					useClass(code, replace.getClsRef());
+					code.add(".this");
+					break;
+				case VAR:
+					addArg(code, replace.getVarRef());
+					break;
 				}
 				return;
 			}
 		}
 		addArgDot(code, arg);
-		if (fieldNode != null) {
-			code.attachAnnotation(fieldNode);
-		}
 		code.add(field.getAlias());
 	}
 
@@ -228,298 +647,302 @@ public class InsnGen {
 		return true;
 	}
 	
+
+	public boolean getInsn(InsnNode insn, CodeWriter code) throws CodegenException {
+		return makeInsn(insn, code, null);
+	}
+
 	private void makeInsnBody(CodeWriter code, InsnNode insn, Set<Flags> state) throws CodegenException {
 		switch (insn.getType()) {
-			case CONST_STR:
-				String str = ((ConstStringNode) insn).getString();
-				code.add(mth.dex().root().getStringUtils().unescapeString(str));
-				break;
+		case CONST_STR:
+			String str = ((ConstStringNode) insn).getString();
+			code.add(mth.dex().root().getStringUtils().unescapeString(str));
+			break;
 
-			case CONST_CLASS:
-				ArgType clsType = ((ConstClassNode) insn).getClsType();
-				useType(code, clsType);
-				code.add(".class");
-				break;
+		case CONST_CLASS:
+			ArgType clsType = ((ConstClassNode) insn).getClsType();
+			useType(code, clsType);
+			code.add(".class");
+			break;
 
-			case CONST:
-				LiteralArg arg = (LiteralArg) insn.getArg(0);
-				code.add(lit(arg));
-				break;
+		case CONST:
+			LiteralArg arg = (LiteralArg) insn.getArg(0);
+			code.add(lit(arg));
+			break;
 
-			case MOVE:
-				addArg(code, insn.getArg(0), false);
-				break;
+		case MOVE:
+			addArg(code, insn.getArg(0), false);
+			break;
 
-			case CHECK_CAST:
-			case CAST: {
-				boolean wrap = state.contains(Flags.BODY_ONLY);
-				if (wrap) {
-					code.add('(');
-				}
+		case CHECK_CAST:
+		case CAST: {
+			boolean wrap = state.contains(Flags.BODY_ONLY);
+			if (wrap) {
 				code.add('(');
-				useType(code, (ArgType) ((IndexInsnNode) insn).getIndex());
-				code.add(") ");
-				addArg(code, insn.getArg(0), true);
-				if (wrap) {
-					code.add(')');
-				}
-				break;
 			}
+			code.add('(');
+			useType(code, (ArgType) ((IndexInsnNode) insn).getIndex());
+			code.add(") ");
+			addArg(code, insn.getArg(0), true);
+			if (wrap) {
+				code.add(')');
+			}
+			break;
+		}
 
-			case ARITH:
-				makeArith((ArithNode) insn, code, state);
-				break;
+		case ARITH:
+			makeArith((ArithNode) insn, code, state);
+			break;
 
-			case NEG:
-				oneArgInsn(code, insn, state, '-');
-				break;
+		case NEG:
+			oneArgInsn(code, insn, state, '-');
+			break;
 
-			case NOT:
-				oneArgInsn(code, insn, state, '~');
-				break;
+		case NOT:
+			oneArgInsn(code, insn, state, '~');
+			break;
 
-			case RETURN:
-				if (insn.getArgsCount() != 0) {
-					code.add("return ");
-					addArg(code, insn.getArg(0), false);
-				} else {
-					code.add("return");
-				}
-				break;
+		case RETURN:
+			if (insn.getArgsCount() != 0) {
+				code.add("return ");
+				addArg(code, insn.getArg(0), false);
+			} else {
+				code.add("return");
+			}
+			break;
 
-			case BREAK:
-				code.add("break");
-				LoopLabelAttr labelAttr = insn.get(AType.LOOP_LABEL);
-				if (labelAttr != null) {
-					code.add(' ').add(mgen.getNameGen().getLoopLabel(labelAttr));
-				}
-				break;
+		case BREAK:
+			code.add("break");
+			LoopLabelAttr labelAttr = insn.get(AType.LOOP_LABEL);
+			if (labelAttr != null) {
+				code.add(' ').add(mgen.getNameGen().getLoopLabel(labelAttr));
+			}
+			break;
 
-			case CONTINUE:
-				code.add("continue");
-				break;
+		case CONTINUE:
+			code.add("continue");
+			break;
 
-			case THROW:
-				code.add("throw ");
-				addArg(code, insn.getArg(0), true);
-				break;
+		case THROW:
+			code.add("throw ");
+			addArg(code, insn.getArg(0), true);
+			break;
 
-			case CMP_L:
-			case CMP_G:
+		case CMP_L:
+		case CMP_G:
+			code.add('(');
+			addArg(code, insn.getArg(0));
+			code.add(" > ");
+			addArg(code, insn.getArg(1));
+			code.add(" ? 1 : (");
+			addArg(code, insn.getArg(0));
+			code.add(" == ");
+			addArg(code, insn.getArg(1));
+			code.add(" ? 0 : -1))");
+			break;
+
+		case INSTANCE_OF: {
+			boolean wrap = state.contains(Flags.BODY_ONLY);
+			if (wrap) {
 				code.add('(');
-				addArg(code, insn.getArg(0));
-				code.add(" > ");
-				addArg(code, insn.getArg(1));
-				code.add(" ? 1 : (");
-				addArg(code, insn.getArg(0));
-				code.add(" == ");
-				addArg(code, insn.getArg(1));
-				code.add(" ? 0 : -1))");
-				break;
-
-			case INSTANCE_OF: {
-				boolean wrap = state.contains(Flags.BODY_ONLY);
-				if (wrap) {
-					code.add('(');
-				}
-				addArg(code, insn.getArg(0));
-				code.add(" instanceof ");
-				useType(code, (ArgType) ((IndexInsnNode) insn).getIndex());
-				if (wrap) {
-					code.add(')');
-				}
-				break;
 			}
-			case CONSTRUCTOR:
-				makeConstructor((ConstructorInsn) insn, code);
-				break;
-
-			case INVOKE:
-				makeInvoke((InvokeNode) insn, code);
-				break;
-
-			case NEW_ARRAY: {
-				ArgType arrayType = ((NewArrayNode) insn).getArrayType();
-				code.add("new ");
-				useType(code, arrayType.getArrayRootElement());
-				code.add('[');
-				addArg(code, insn.getArg(0));
-				code.add(']');
-				int dim = arrayType.getArrayDimension();
-				for (int i = 0; i < dim - 1; i++) {
-					code.add("[]");
-				}
-				break;
+			addArg(code, insn.getArg(0));
+			code.add(" instanceof ");
+			useType(code, (ArgType) ((IndexInsnNode) insn).getIndex());
+			if (wrap) {
+				code.add(')');
 			}
+			break;
+		}
+		case CONSTRUCTOR:
+			makeConstructor((ConstructorInsn) insn, code);
+			break;
 
-			case ARRAY_LENGTH:
-				addArg(code, insn.getArg(0));
-				code.add(".length");
-				break;
+		case INVOKE:
+			makeInvoke((InvokeNode) insn, code);
+			break;
 
-			case FILLED_NEW_ARRAY:
-				filledNewArray((FilledNewArrayNode) insn, code);
-				break;
-
-			case AGET:
-				addArg(code, insn.getArg(0));
-				code.add('[');
-				addArg(code, insn.getArg(1), false);
-				code.add(']');
-				break;
-
-			case APUT:
-				addArg(code, insn.getArg(0));
-				code.add('[');
-				addArg(code, insn.getArg(1), false);
-				code.add("] = ");
-				addArg(code, insn.getArg(2), false);
-				break;
-
-			case IGET: {
-				FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
-				instanceField(code, fieldInfo, insn.getArg(0));
-				break;
+		case NEW_ARRAY: {
+			ArgType arrayType = ((NewArrayNode) insn).getArrayType();
+			code.add("new ");
+			useType(code, arrayType.getArrayRootElement());
+			code.add('[');
+			addArg(code, insn.getArg(0));
+			code.add(']');
+			int dim = arrayType.getArrayDimension();
+			for (int i = 0; i < dim - 1; i++) {
+				code.add("[]");
 			}
-			case IPUT: {
-				FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
-				instanceField(code, fieldInfo, insn.getArg(1));
-				code.add(" = ");
-				addArg(code, insn.getArg(0), false);
-				break;
+			break;
+		}
+
+		case ARRAY_LENGTH:
+			addArg(code, insn.getArg(0));
+			code.add(".length");
+			break;
+
+		case FILLED_NEW_ARRAY:
+			filledNewArray((FilledNewArrayNode) insn, code);
+			break;
+
+		case AGET:
+			addArg(code, insn.getArg(0));
+			code.add('[');
+			addArg(code, insn.getArg(1), false);
+			code.add(']');
+			break;
+
+		case APUT:
+			addArg(code, insn.getArg(0));
+			code.add('[');
+			addArg(code, insn.getArg(1), false);
+			code.add("] = ");
+			addArg(code, insn.getArg(2), false);
+			break;
+
+		case IGET: {
+			FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
+			instanceField(code, fieldInfo, insn.getArg(0));
+			break;
+		}
+		case IPUT: {
+			FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
+			instanceField(code, fieldInfo, insn.getArg(1));
+			code.add(" = ");
+			addArg(code, insn.getArg(0), false);
+			break;
+		}
+
+		case SGET:
+			staticField(code, (FieldInfo) ((IndexInsnNode) insn).getIndex());
+			break;
+		case SPUT:
+			FieldInfo field = (FieldInfo) ((IndexInsnNode) insn).getIndex();
+			staticField(code, field);
+			code.add(" = ");
+			addArg(code, insn.getArg(0), false);
+			break;
+
+		case STR_CONCAT:
+			boolean wrap = state.contains(Flags.BODY_ONLY);
+			if (wrap) {
+				code.add('(');
 			}
-
-			case SGET:
-				staticField(code, (FieldInfo) ((IndexInsnNode) insn).getIndex());
-				break;
-			case SPUT:
-				FieldInfo field = (FieldInfo) ((IndexInsnNode) insn).getIndex();
-				staticField(code, field);
-				code.add(" = ");
-				addArg(code, insn.getArg(0), false);
-				break;
-
-			case STR_CONCAT:
-				boolean wrap = state.contains(Flags.BODY_ONLY);
-				if (wrap) {
-					code.add('(');
+			for (Iterator<InsnArg> it = insn.getArguments().iterator(); it.hasNext();) {
+				addArg(code, it.next());
+				if (it.hasNext()) {
+					code.add(" + ");
 				}
-				for (Iterator<InsnArg> it = insn.getArguments().iterator(); it.hasNext(); ) {
-					addArg(code, it.next());
-					if (it.hasNext()) {
-						code.add(" + ");
-					}
-				}
-				if (wrap) {
-					code.add(')');
-				}
-				break;
+			}
+			if (wrap) {
+				code.add(')');
+			}
+			break;
 
-			case MONITOR_ENTER:
-				if (isFallback()) {
-					code.add("monitor-enter(");
-					addArg(code, insn.getArg(0));
-					code.add(')');
-				}
-				break;
-
-			case MONITOR_EXIT:
-				if (isFallback()) {
-					code.add("monitor-exit(");
-					addArg(code, insn.getArg(0));
-					code.add(')');
-				}
-				break;
-
-			case TERNARY:
-				makeTernary((TernaryInsn) insn, code, state);
-				break;
-
-			case ONE_ARG:
+		case MONITOR_ENTER:
+			if (isFallback()) {
+				code.add("monitor-enter(");
 				addArg(code, insn.getArg(0));
-				break;
+				code.add(')');
+			}
+			break;
 
-			/* fallback mode instructions */
-			case IF:
-				fallbackOnlyInsn(insn);
-				IfNode ifInsn = (IfNode) insn;
-				code.add("if (");
+		case MONITOR_EXIT:
+			if (isFallback()) {
+				code.add("monitor-exit(");
 				addArg(code, insn.getArg(0));
+				code.add(')');
+			}
+			break;
+
+		case TERNARY:
+			makeTernary((TernaryInsn) insn, code, state);
+			break;
+
+		case ONE_ARG:
+			addArg(code, insn.getArg(0));
+			break;
+
+		/* fallback mode instructions */
+		case IF:
+			fallbackOnlyInsn(insn);
+			IfNode ifInsn = (IfNode) insn;
+			code.add("if (");
+			addArg(code, insn.getArg(0));
+			code.add(' ');
+			code.add(ifInsn.getOp().getSymbol()).add(' ');
+			addArg(code, insn.getArg(1));
+			code.add(") goto ").add(MethodGen.getLabelName(ifInsn.getTarget()));
+			break;
+
+		case GOTO:
+			fallbackOnlyInsn(insn);
+			code.add("goto ").add(MethodGen.getLabelName(((GotoNode) insn).getTarget()));
+			break;
+
+		case MOVE_EXCEPTION:
+			fallbackOnlyInsn(insn);
+			code.add("move-exception");
+			break;
+
+		case SWITCH:
+			fallbackOnlyInsn(insn);
+			SwitchNode sw = (SwitchNode) insn;
+			code.add("switch(");
+			addArg(code, insn.getArg(0));
+			code.add(") {");
+			code.incIndent();
+			for (int i = 0; i < sw.getCasesCount(); i++) {
+				String key = sw.getKeys()[i].toString();
+				code.startLine("case ").add(key).add(": goto ");
+				code.add(MethodGen.getLabelName(sw.getTargets()[i])).add(';');
+			}
+			code.startLine("default: goto ");
+			code.add(MethodGen.getLabelName(sw.getDefaultCaseOffset())).add(';');
+			code.decIndent();
+			code.startLine('}');
+			break;
+
+		case FILL_ARRAY:
+			fallbackOnlyInsn(insn);
+			FillArrayNode arrayNode = (FillArrayNode) insn;
+			Object data = arrayNode.getData();
+			String arrStr;
+			if (data instanceof int[]) {
+				arrStr = Arrays.toString((int[]) data);
+			} else if (data instanceof short[]) {
+				arrStr = Arrays.toString((short[]) data);
+			} else if (data instanceof byte[]) {
+				arrStr = Arrays.toString((byte[]) data);
+			} else if (data instanceof long[]) {
+				arrStr = Arrays.toString((long[]) data);
+			} else {
+				arrStr = "?";
+			}
+			code.add('{').add(arrStr.substring(1, arrStr.length() - 1)).add('}');
+			break;
+
+		case NEW_INSTANCE:
+			// only fallback - make new instance in constructor invoke
+			fallbackOnlyInsn(insn);
+			code.add("new ").add(insn.getResult().getType().toString());
+			break;
+
+		case PHI:
+		case MERGE:
+			fallbackOnlyInsn(insn);
+			code.add(insn.getType().toString()).add("(");
+			for (InsnArg insnArg : insn.getArguments()) {
+				addArg(code, insnArg);
 				code.add(' ');
-				code.add(ifInsn.getOp().getSymbol()).add(' ');
-				addArg(code, insn.getArg(1));
-				code.add(") goto ").add(MethodGen.getLabelName(ifInsn.getTarget()));
-				break;
+			}
+			code.add(")");
+			break;
 
-			case GOTO:
-				fallbackOnlyInsn(insn);
-				code.add("goto ").add(MethodGen.getLabelName(((GotoNode) insn).getTarget()));
-				break;
-
-			case MOVE_EXCEPTION:
-				fallbackOnlyInsn(insn);
-				code.add("move-exception");
-				break;
-
-			case SWITCH:
-				fallbackOnlyInsn(insn);
-				SwitchNode sw = (SwitchNode) insn;
-				code.add("switch(");
-				addArg(code, insn.getArg(0));
-				code.add(") {");
-				code.incIndent();
-				for (int i = 0; i < sw.getCasesCount(); i++) {
-					String key = sw.getKeys()[i].toString();
-					code.startLine("case ").add(key).add(": goto ");
-					code.add(MethodGen.getLabelName(sw.getTargets()[i])).add(';');
-				}
-				code.startLine("default: goto ");
-				code.add(MethodGen.getLabelName(sw.getDefaultCaseOffset())).add(';');
-				code.decIndent();
-				code.startLine('}');
-				break;
-
-			case FILL_ARRAY:
-				fallbackOnlyInsn(insn);
-				FillArrayNode arrayNode = (FillArrayNode) insn;
-				Object data = arrayNode.getData();
-				String arrStr;
-				if (data instanceof int[]) {
-					arrStr = Arrays.toString((int[]) data);
-				} else if (data instanceof short[]) {
-					arrStr = Arrays.toString((short[]) data);
-				} else if (data instanceof byte[]) {
-					arrStr = Arrays.toString((byte[]) data);
-				} else if (data instanceof long[]) {
-					arrStr = Arrays.toString((long[]) data);
-				} else {
-					arrStr = "?";
-				}
-				code.add('{').add(arrStr.substring(1, arrStr.length() - 1)).add('}');
-				break;
-
-			case NEW_INSTANCE:
-				// only fallback - make new instance in constructor invoke
-				fallbackOnlyInsn(insn);
-				code.add("new ").add(insn.getResult().getType().toString());
-				break;
-
-			case PHI:
-			case MERGE:
-				fallbackOnlyInsn(insn);
-				code.add(insn.getType().toString()).add("(");
-				for (InsnArg insnArg : insn.getArguments()) {
-					addArg(code, insnArg);
-					code.add(' ');
-				}
-				code.add(")");
-				break;
-
-			default:
-				throw new CodegenException(mth, "Unknown instruction: " + insn.getType());
+		default:
+			throw new CodegenException(mth, "Unknown instruction: " + insn.getType());
 		}
 	}
-	
 
 	private void oneArgInsn(CodeWriter code, InsnNode insn, Set<Flags> state, char op) throws CodegenException {
 		boolean wrap = state.contains(Flags.BODY_ONLY);
@@ -553,8 +976,7 @@ public class InsnGen {
 		code.add('}');
 	}
 
-	private void makeConstructor(ConstructorInsn insn, CodeWriter code)
-			throws CodegenException {
+	private void makeConstructor(ConstructorInsn insn, CodeWriter code) throws CodegenException {
 		ClassNode cls = mth.dex().resolveClass(insn.getClassType());
 		if (cls != null && cls.contains(AFlag.ANONYMOUS_CLASS) && !fallback) {
 			inlineAnonymousConstr(code, cls, insn);
@@ -624,31 +1046,31 @@ public class InsnGen {
 		int k = 0;
 		InvokeType type = insn.getInvokeType();
 		switch (type) {
-			case DIRECT:
-			case VIRTUAL:
-			case INTERFACE:
-				InsnArg arg = insn.getArg(0);
-				// FIXME: add 'this' for equals methods in scope
-				if (!arg.isThis()) {
-					addArgDot(code, arg);
-				}
-				k++;
-				break;
+		case DIRECT:
+		case VIRTUAL:
+		case INTERFACE:
+			InsnArg arg = insn.getArg(0);
+			// FIXME: add 'this' for equals methods in scope
+			if (!arg.isThis()) {
+				addArgDot(code, arg);
+			}
+			k++;
+			break;
 
-			case SUPER:
-				// use 'super' instead 'this' in 0 arg
-				code.add("super").add('.');
-				k++;
-				break;
+		case SUPER:
+			// use 'super' instead 'this' in 0 arg
+			code.add("super").add('.');
+			k++;
+			break;
 
-			case STATIC:
-				ClassInfo insnCls = mth.getParentClass().getAlias();
-				ClassInfo declClass = callMth.getDeclClass();
-				if (!insnCls.equals(declClass)) {
-					useClass(code, declClass);
-					code.add('.');
-				}
-				break;
+		case STATIC:
+			ClassInfo insnCls = mth.getParentClass().getAlias();
+			ClassInfo declClass = callMth.getDeclClass();
+			if (!insnCls.equals(declClass)) {
+				useClass(code, declClass);
+				code.add('.');
+			}
+			break;
 		}
 		if (callMthNode != null) {
 			code.attachAnnotation(callMthNode);
@@ -657,8 +1079,8 @@ public class InsnGen {
 		generateMethodArguments(code, insn, k, callMthNode);
 	}
 
-	void generateMethodArguments(CodeWriter code, InsnNode insn, int startArgNum,
-			@Nullable MethodNode callMth) throws CodegenException {
+	void generateMethodArguments(CodeWriter code, InsnNode insn, int startArgNum, @Nullable MethodNode callMth)
+			throws CodegenException {
 		int k = startArgNum;
 		if (callMth != null && callMth.contains(AFlag.SKIP_FIRST_ARG)) {
 			k++;

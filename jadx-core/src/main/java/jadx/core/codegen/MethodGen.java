@@ -122,7 +122,7 @@ public class MethodGen {
 		annotationGen.addThrows(mth, code);
 		return true;
 	}
-
+	
 	private void addMethodArguments(CodeWriter argsCode, List<RegisterArg> args) {
 		MethodParameters paramsAnnotation = mth.get(AType.ANNOTATION_MTH_PARAMETERS);
 		int i = 0;

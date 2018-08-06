@@ -1,27 +1,27 @@
 package jadx.core.statistics;
 
 import java.util.ArrayList;
-import java.util.Iterator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
+import jadx.core.codegen.InsnGen;
 import jadx.core.codegen.MethodGen;
 import jadx.core.codegen.RegionGen;
-import jadx.core.codegen.TypeGen;
-import jadx.core.dex.instructions.args.FieldArg;
+import jadx.core.dex.instructions.IfOp;
+import jadx.core.dex.instructions.args.ArgType;
 import jadx.core.dex.instructions.args.InsnArg;
-import jadx.core.dex.instructions.args.InsnWrapArg;
 import jadx.core.dex.instructions.args.LiteralArg;
-import jadx.core.dex.instructions.args.Named;
-import jadx.core.dex.instructions.args.RegisterArg;
 import jadx.core.dex.nodes.IBlock;
 import jadx.core.dex.nodes.IContainer;
 import jadx.core.dex.nodes.IRegion;
 import jadx.core.dex.nodes.InsnNode;
+import jadx.core.dex.regions.Region;
 import jadx.core.dex.regions.conditions.Compare;
 import jadx.core.dex.regions.conditions.IfCondition;
 import jadx.core.dex.regions.conditions.IfRegion;
 import jadx.core.dex.regions.loops.LoopRegion;
-import jadx.core.dex.regions.conditions.IfCondition.Mode;
+import jadx.core.utils.ErrorsCounter;
 import jadx.core.utils.exceptions.CodegenException;
 
 /**
@@ -32,7 +32,6 @@ public class IfStatistic {
 	RegionGen rGen;
 	IfRegion ifRegion;
 	IContainer els;
-	List<Compare> conditionCompares;
 	List<Statistic> statistics;
 
 	
@@ -40,11 +39,9 @@ public class IfStatistic {
 		this.mth = mth;
 		this.rGen = rGen;
 		this.ifRegion = ifRegion;
-		this.conditionCompares = new ArrayList<Compare>();
 		this.statistics = new ArrayList<Statistic>();
 		
 		createStatistics();
-		
 	}
 	
 	private void createStatistics() {
@@ -52,7 +49,11 @@ public class IfStatistic {
 		try {
 			// Then
 			System.out.println("Found If: " + ifRegion.getCondition());
-			addStatistic(ifRegion.getThenRegion(), ifRegion.getCondition(), false);
+			
+			// IfRegion, abstractly an IRegion
+			int ifNestingLevel = getNestingLevel((IRegion) ifRegion) - 1;
+			
+			addStatistic(ifRegion.getThenRegion(), ifRegion.getCondition(), false, ifNestingLevel);
 			
 			// Handle the conditions else if and else cases
 			for (IfRegionInfo info : rGen.getIfRegionInfo(ifRegion)) {
@@ -60,12 +61,12 @@ public class IfStatistic {
 				if (!info.isElse()) {
 					System.out.println("Found Else If: " + info.getCondition());
 					IfRegion ir = (IfRegion) info.getRegion();
-					addStatistic(ir.getThenRegion(), info.getCondition(), info.isElse());
+					addStatistic(ir.getThenRegion(), info.getCondition(), info.isElse(), ifNestingLevel);
 				}
 				// Else Case
 				else {
 					System.out.println("Found Else");
-					addStatistic(info.getRegion(), info.getCondition(), info.isElse());
+					addStatistic(info.getRegion(), info.getCondition(), info.isElse(), ifNestingLevel);
 				}
 			}
 		} catch (CodegenException e) {
@@ -73,64 +74,60 @@ public class IfStatistic {
 		}
 	}
 	
-	private void addStatistic(IContainer container, IfCondition condition, boolean isElse) throws CodegenException {
+	private void addStatistic(IContainer container, IfCondition condition, boolean isElse, int nestingLevel) throws CodegenException {
 		Statistic stat = new Statistic(container, isElse);
+		InsnGen iGen = new InsnGen(mth, false);
 		
 		stat.setNumStatements(getNumStatements(container));
 		stat.setNumNestedIfStatements(rGen.getNumNestedIfConditions(container));
 		stat.setInLoop(inLoop((IRegion) container));
+		stat.setNestingLevel(nestingLevel);
 		
-		List<Compare> comparisons = getCompareList(condition);
+		List<Compare> comparisons = iGen.getCompareList(condition);
 		stat.setComparisonList(comparisons);
 
+		InsnVariableContainer vc = new InsnVariableContainer();
+		
 		for (Compare compare : comparisons) {
-			InsnArg arg = compare.getA();
-			InsnArg arg2 = compare.getB();
-
-			//getVariables(arg);
-			//getVariables(arg2);
+			iGen.getVariableUsageFromArg(false, vc, compare.getA(), false);
+			iGen.getVariableUsageFromArg(false, vc, compare.getB(), false);
 		}
+		
+		vc.cleanUpLiterals();
+
+		// Read, Write, and Method Calls from If Condition
+		Set<String> readVariables = new HashSet<String>();
+		Set<String> writeVariables = new HashSet<String>();
+		Set<String> methodCalls = new HashSet<String>();
+
+		for (VariableUsage usage : vc.getReadVariables()) { readVariables.add(usage.toString()); }
+		for (VariableUsage usage : vc.getWriteVariables()) { writeVariables.add(usage.toString()); }
+		for (MethodCall call : vc.getMethodCalls()) { methodCalls.add(call.toString());}
+
+		stat.setReadVarInCond(vc.getReadVariables());
+		stat.setWriteVarInCond(vc.getReadVariables());
+		stat.setMethodCallsInCond(vc.getMethodCalls());
+		
+		stat.setUniqueReadVarInCond(readVariables);
+		stat.setUniqueWriteVarInCond(writeVariables);
+		stat.setUniqueMethodCallsInCond(methodCalls);
+		
+		System.out.println("Num Overall Read Variables: " + vc.getReadVariables().toString());
+		System.out.println("Num Overall Written Variables: " + vc.getWriteVariables().toString());
+		System.out.println("Num Overall Method Calls" + vc.getMethodCalls().toString());
+		System.out.println("");
+		System.out.println("Unique Read Variables: " + readVariables.toString());
+		System.out.println("Unique Written Variables: " + writeVariables.toString());
+		System.out.println("Unique Method Calls" + methodCalls.toString());
+		
+		System.out.println("Variables read/written and Method calls for If Condition:");
+		System.out.println(vc.toString());
+
+		System.out.println("On Method: " + mth.getMethodNode().getMethodInfo().getFullName());
+		System.out.println("==================");
 		
 		statistics.add(stat);
 	}
-	
-	/*
-	private void getVariables(InsnArg arg) throws CodegenException {
-		if (arg.isRegister()) {
-			RegisterArg rArg = (RegisterArg) arg;
-			String name = rArg.getName();
-			if (name == null) {
-				name = "r" + rArg.getRegNum();
-			}
-		} else if (arg.isLiteral()) {
-			LiteralArg lArg = (LiteralArg) arg;
-			System.out.println(TypeGen.literalToString(lArg.getLiteral(), arg.getType(), mth.getMethodNode()));
-		} else if (arg.isInsnWrap()) {
-			System.out.println("Instruction Wrap");
-			InsnWrapArg iwArg = (InsnWrapArg) arg;
-			
-			Iterator it = iwArg.getWrapInsn().getArguments().iterator();
-			getVariables(iwArg.getWrapInsn().getResult());
-			while(it.hasNext()) {
-				InsnArg a = (InsnArg) it.next();
-				getVariables(a);
-			}
-			//Flags flag = wrap ? Flags.BODY_ONLY : Flags.BODY_ONLY_NOWRAP;
-			//makeInsn(((InsnWrapArg) arg).getWrapInsn(), code, flag);
-		} else if (arg.isNamed()) {
-			//code.add(((Named) arg).getName());
-		} else if (arg.isField()) {
-			//FieldArg f = (FieldArg) arg;
-			//if (f.isStatic()) {
-			//	staticField(code, f.getField());
-			//} else {
-			//	instanceField(code, f.getField(), f.getInstanceArg());
-			//}
-		} else {
-			throw new CodegenException("Unknown arg type " + arg);
-		}
-	}
-	*/
 	
 	private int getNumStatements(IContainer container) throws CodegenException {
 		int numStatements = 0;
@@ -140,16 +137,6 @@ public class IfStatistic {
 			}
 		}
 		return numStatements;
-	}
-	
-	// Returns a new list if condition specified is null
-	public List<Compare> getCompareList(IfCondition condition) {
-		if (condition == null)
-			return new ArrayList<Compare>();
-		
-		conditionCompares.clear();
-		traverseCondition(condition);
-		return conditionCompares;
 	}
 	
 	private boolean inLoop(IRegion region) {
@@ -169,31 +156,36 @@ public class IfStatistic {
 			return 0;
 		}
 		else {
-			return getNestingLevel(region.getParent()) + 1;
+			if (region instanceof Region) {
+				return getNestingLevel(region.getParent()) + 0;
+			}
+			else {
+				return getNestingLevel(region.getParent()) + 1;
+			}
 		}
 	}
 	
-	private void traverseCondition(IfCondition condition) {
-		switch (condition.getMode()) {
-		case COMPARE:
-			conditionCompares.add(condition.getCompare());
-			break;
-		case TERNARY:
-			traverseCondition(condition.first());
-			traverseCondition(condition.second());
-			traverseCondition(condition.third());
-			break;
-		case NOT:
-			break;
-		case AND:
-		case OR:
-			String mode = condition.getMode() == Mode.AND ? " && " : " || ";
-			for (IfCondition c : condition.getArgs()) {
-				traverseCondition(c);
+	private void handleCompare(InsnVariableContainer vc, Compare compare) {
+		IfOp op = compare.getOp();
+		InsnArg firstArg = compare.getA();
+		InsnArg secondArg = compare.getB();
+		
+		if (firstArg.getType().equals(ArgType.BOOLEAN)
+				&& secondArg.isLiteral()
+				&& secondArg.getType().equals(ArgType.BOOLEAN)) {
+			LiteralArg lit = (LiteralArg) secondArg;
+			if (lit.getLiteral() == 0) {
+				op = op.invert();
 			}
-			break;
-
-		default:
+			if (op == IfOp.EQ) {
+				// == true
+				//if (stack.getStack().size() == 1) {
+				//	addArg(code, firstArg, false);
+				//}
+				return;
+			} else if (op == IfOp.NE) {
+				return;
+			}
 		}
 	}
 }
