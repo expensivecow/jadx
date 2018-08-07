@@ -392,17 +392,21 @@ public class InsnGen {
 
 	private void getSingleArithVariable(InsnVariableContainer vc, ArithNode insn) throws CodegenException {
 		ArithOp op = insn.getOp();
+		InsnArg writeArg = insn.getArg(0);
 		InsnArg arg = insn.getArg(1);
 		// "++" or "--"
 		if (arg.isLiteral() && (op == ArithOp.ADD || op == ArithOp.SUB)) {
 			LiteralArg lit = (LiteralArg) arg;
 			if (lit.isInteger() && lit.getLiteral() == 1) {
+				getVariableUsageFromArg(false, vc, writeArg, false);
+				getVariableUsageFromArg(false, vc, lit, false);
 				getAssignedVariables(vc, insn);
 				return;
 			}
 		}
 		// +=, -= ...
 		getAssignedVariables(vc, insn);
+		getVariableUsageFromArg(false, vc, writeArg, false);
 		getVariableUsageFromArg(false, vc, arg, false);
 	}
 	

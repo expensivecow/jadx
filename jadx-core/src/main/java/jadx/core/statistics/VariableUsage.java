@@ -1,7 +1,6 @@
 package jadx.core.statistics;
 
 import jadx.core.codegen.ArgTypes;
-import jadx.core.dex.instructions.args.InsnArg;
 
 public class VariableUsage {
 	String name;

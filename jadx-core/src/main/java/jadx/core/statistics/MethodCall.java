@@ -1,6 +1,5 @@
 package jadx.core.statistics;
 
-import java.util.ArrayList;
 import java.util.List;
 
 import jadx.core.dex.info.ClassInfo;

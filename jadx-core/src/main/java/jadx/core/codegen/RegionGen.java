@@ -64,10 +64,10 @@ public class RegionGen extends InsnGen {
 				declareVars(code, cont);
 				if (cont instanceof IfRegion) {
 					makeIf((IfRegion) cont, code, true);
-					if (mgen.getMethodNode().getMethodInfo().getFullName().contains("android.support.v4.view.ViewPager.onPageScrolled")) {
+					//if (mgen.getMethodNode().getMethodInfo().getFullName().contains("android.support.v4.app.DialogFragment.dismissInternal")) {
 						IfRegion ifRegion = (IfRegion) cont;
 						FeatureAnalysis.getInstance().addStatistic(mgen, ifRegion, this);
-					}
+					//}
 				} else if (cont instanceof SwitchRegion) {
 					makeSwitch((SwitchRegion) cont, code);
 				} else if (cont instanceof LoopRegion) {

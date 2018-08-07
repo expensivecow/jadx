@@ -31,4 +31,8 @@ public class IfStatistics {
 			statistics.put(region, statistic);
 		}
 	}
+	
+	public HashMap<IfRegion, IfStatistic> getIfStatisticForMethod() {
+		return statistics;
+	}
 }
