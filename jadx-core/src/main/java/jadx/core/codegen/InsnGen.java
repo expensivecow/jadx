@@ -27,6 +27,7 @@ import jadx.core.dex.instructions.FillArrayNode;
 import jadx.core.dex.instructions.FilledNewArrayNode;
 import jadx.core.dex.instructions.GotoNode;
 import jadx.core.dex.instructions.IfNode;
+import jadx.core.dex.instructions.IfOp;
 import jadx.core.dex.instructions.IndexInsnNode;
 import jadx.core.dex.instructions.InsnType;
 import jadx.core.dex.instructions.InvokeNode;
@@ -127,6 +128,10 @@ public class InsnGen {
 			variableContainer.addReadUsage(usage);
 		}
 	}
+
+	public boolean getInsnVariables(InsnVariableContainer vc, InsnNode insn) throws CodegenException {
+		return getInsnVariables(vc, insn, null);
+	}
 	
 	protected boolean getInsnVariables(InsnVariableContainer vc, InsnNode insn, Flags flag) throws CodegenException {
 		try {
@@ -149,16 +154,16 @@ public class InsnGen {
 	//TODO: Modified Region
 	public void getVariableUsageFromArg(boolean isWrite, InsnVariableContainer vc, InsnArg arg, boolean wrap) throws CodegenException {
 		if (arg.isRegister()) {
-			VariableUsage usage = new VariableUsage(arg, mgen.getNameGen().useArg((RegisterArg) arg));
+			VariableUsage usage = new VariableUsage(ArgTypes.VARIABLE, mgen.getNameGen().useArg((RegisterArg) arg));
 			addVariableUsage(vc, isWrite, usage);
 		} else if (arg.isLiteral()) {
-			VariableUsage usage = new VariableUsage(arg, lit((LiteralArg) arg));
+			VariableUsage usage = new VariableUsage(ArgTypes.LITERAL, lit((LiteralArg) arg));
 			addVariableUsage(vc, isWrite, usage);
 		} else if (arg.isInsnWrap()) {
 			Flags flag = wrap ? Flags.BODY_ONLY : Flags.BODY_ONLY_NOWRAP;
 			getInsnVariables(vc, ((InsnWrapArg) arg).getWrapInsn(), flag);
 		} else if (arg.isNamed()) {
-			VariableUsage usage = new VariableUsage(arg, ((Named) arg).getName());
+			VariableUsage usage = new VariableUsage(ArgTypes.VARIABLE, ((Named) arg).getName());
 			addVariableUsage(vc, isWrite, usage);
 		} else if (arg.isField()) {
 			FieldArg f = (FieldArg) arg;
@@ -166,13 +171,13 @@ public class InsnGen {
 				CodeWriter staticFieldCode = new CodeWriter();
 
 				staticField(staticFieldCode, f.getField());
-				VariableUsage usage = new VariableUsage(arg, staticFieldCode.toString());
+				VariableUsage usage = new VariableUsage(ArgTypes.VARIABLE, staticFieldCode.toString());
 				addVariableUsage(vc, isWrite, usage);
 			} else {
 				CodeWriter instanceFieldCode = new CodeWriter();
 				instanceField(instanceFieldCode, f.getField(), f.getInstanceArg());
 
-				VariableUsage usage = new VariableUsage(arg, instanceFieldCode.toString());
+				VariableUsage usage = new VariableUsage(ArgTypes.VARIABLE, instanceFieldCode.toString());
 				addVariableUsage(vc, isWrite, usage);
 			}
 		} else {
@@ -189,7 +194,7 @@ public class InsnGen {
 			String str = ((ConstStringNode) insn).getString();
 			writer.add(mth.dex().root().getStringUtils().unescapeString(str));
 			
-			u = new VariableUsage(insn.getArg(0), writer.toString());
+			u = new VariableUsage(ArgTypes.LITERAL, writer.toString());
 			addVariableUsage(vc, false, u);
 			break;
 
@@ -199,13 +204,13 @@ public class InsnGen {
 			useType(writer, clsType);
 			writer.add(".class");
 			
-			u = new VariableUsage(insn.getArg(0), writer.toString());
+			u = new VariableUsage(ArgTypes.LITERAL, writer.toString());
 			addVariableUsage(vc, false, u);
 			break;
 
 		case CONST:
 			LiteralArg arg = (LiteralArg) insn.getArg(0);
-			u = new VariableUsage(arg, lit(arg));
+			u = new VariableUsage(ArgTypes.LITERAL, lit(arg));
 			addVariableUsage(vc, false, u);
 			break;
 
@@ -280,7 +285,7 @@ public class InsnGen {
 			addArg(writer, insn.getArg(0));
 			writer.add(".length");
 			
-			u = new VariableUsage(insn.getArg(0), writer.toString());
+			u = new VariableUsage(ArgTypes.VARIABLE, writer.toString());
 			addVariableUsage(vc, false, u);
 			break;
 
@@ -307,12 +312,19 @@ public class InsnGen {
 			FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
 			instanceField(writer, fieldInfo, insn.getArg(0));
 
-			u = new VariableUsage(insn.getArg(0), writer.toString());
+			u = new VariableUsage(ArgTypes.VARIABLE, writer.toString());
 			addVariableUsage(vc, false, u);
 			break;
 		}
 		case IPUT: {
-			getVariableUsageFromArg(true, vc, insn.getArg(1), true);
+			writer = new CodeWriter();
+
+			FieldInfo fieldInfo = (FieldInfo) ((IndexInsnNode) insn).getIndex();
+			instanceField(writer, fieldInfo, insn.getArg(1));
+			
+			u = new VariableUsage(ArgTypes.VARIABLE, writer.toString());
+			addVariableUsage(vc, true, u);
+			
 			getVariableUsageFromArg(false, vc, insn.getArg(0), false);
 			break;
 		}
@@ -321,7 +333,7 @@ public class InsnGen {
 			writer = new CodeWriter();
 			staticField(writer, (FieldInfo) ((IndexInsnNode) insn).getIndex());
 
-			u = new VariableUsage(null, writer.toString());
+			u = new VariableUsage(ArgTypes.VARIABLE, writer.toString());
 			addVariableUsage(vc, false, u);
 			break;
 			
@@ -329,7 +341,7 @@ public class InsnGen {
 			writer = new CodeWriter();
 			staticField(writer, (FieldInfo) ((IndexInsnNode) insn).getIndex());
 
-			u = new VariableUsage(insn.getArg(0), writer.toString());
+			u = new VariableUsage(ArgTypes.VARIABLE, writer.toString());
 			addVariableUsage(vc, true, u);
 
 			getVariableUsageFromArg(false, vc, insn.getArg(0), false);
@@ -360,11 +372,9 @@ public class InsnGen {
 			InsnArg second = insn.getArg(1);
 			
 			for (Compare compare : getCompareList(tInsn.getCondition())) {
-				getVariableUsageFromArg(false, vc, compare.getA(), false);
-				getVariableUsageFromArg(false, vc, compare.getB(), false);
+				handleCompare(vc, compare);
 			}
 			
-			// TODO look at variables in the if condition
 			getVariableUsageFromArg(false, vc, first, false);
 			getVariableUsageFromArg(false, vc, second, false);
 		
@@ -409,7 +419,7 @@ public class InsnGen {
 	private void getAssignedVariables(InsnVariableContainer vc, InsnNode insn) throws CodegenException {
 		RegisterArg arg = insn.getResult();
 		if (insn.contains(AFlag.DECLARE_VAR)) {
-			VariableUsage usage = new VariableUsage(arg, mgen.getNameGen().assignArg(arg));
+			VariableUsage usage = new VariableUsage(ArgTypes.VARIABLE, mgen.getNameGen().assignArg(arg));
 			vc.addWriteUsage(usage);
 		} else {
 			getVariableUsageFromArg(true, vc, arg, false);
@@ -496,6 +506,31 @@ public class InsnGen {
 		default:
 		}
 	}
+
+	public void handleCompare(InsnVariableContainer vc, Compare compare) throws CodegenException {
+		IfOp op = compare.getOp();
+		InsnArg firstArg = compare.getA();
+		InsnArg secondArg = compare.getB();
+		
+		if (firstArg.getType().equals(ArgType.BOOLEAN)
+				&& secondArg.isLiteral()
+				&& secondArg.getType().equals(ArgType.BOOLEAN)) {
+			LiteralArg lit = (LiteralArg) secondArg;
+			if (lit.getLiteral() == 0) {
+				op = op.invert();
+			}
+			if (op == IfOp.EQ) {
+				// == true
+				getVariableUsageFromArg(false, vc, firstArg, false);
+				return;
+			}
+			ErrorsCounter.methodError(mth, "Unsupported boolean condition " + op.getSymbol());
+		}
+
+		getVariableUsageFromArg(false, vc, firstArg, false);
+		getVariableUsageFromArg(false, vc, secondArg, false);
+	}
+	
 	// TODO
 
 	public void assignVar(CodeWriter code, InsnNode insn) throws CodegenException {
