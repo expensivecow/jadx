@@ -44,46 +44,48 @@ public class FeatureAnalysis {
     public void clear() {
     	statistics.clear();
     }
-    
-    public String getTitles() {
+   
+    public String getTitles(String delimiter) {
 		String result = ""; 
-		result += "Filename" + ",";
-		result += "Method"+ ",";
-		result += "Condition" + ",";
-		result += "Num Statements" + ",";
-		result += "Num Nested If Statements" + ",";
-		result += "Nesting Level" + ",";
-		result += "In Loop" + ",";
-		result += "Num Comparisons" + ",";
-		result += "Num If Containers" + ",";
-		result += "Num Overall Variables Read In Condition" + ",";
-		result += "Num Overall Variables Written In Condition" + ",";
-		result += "Num Overall Literals Read In Condition" + ",";
-		result += "Num Overall Literals Written In Condition" + ",";
-		result += "Num Overall Variables Method Calls In Condition" + ",";
-		result += "Num Unique Variables Read In Condition" + ",";
-		result += "Num Unique Variables Written In Condition" + ",";
-		result += "Num Unique Literals Read In Condition" + ",";
-		result += "Num Unique Literals Written In Condition" + ",";
-		result += "Num Unique Variables Method Calls In Condition" + ",";
-		result += "Num Total Reads In Then: " + ",";
-		result += "Num Unique Reads In Then (1 per statement)" + ",";
-		result += "Num Total Writes In Then" + ",";
-		result += "Num Read after Cond Read In Then" + ",";
-		result += "Num Write after Cond Read In Then" + ",";
-		result += "Num Read after Cond Write In Then" + ",";
-		result += "Num Write after Cond Write In Then" + ",";
-		result += "Num Total Method Calls In Then" + ",";
-		result += "Num Unique Method Calls In Then" + ",";
-		result += "Num Total Reads In Else" + ",";
-		result += "Num Unique Reads In Else (1 per statement): " + ",";
-		result += "Num Total Writes In Else" + ",";
-		result += "Num Read after Cond Read In Else" + ",";
-		result += "Num Write after Cond Read In Else" + ",";
-		result += "Num Read after Cond Write In Else" + ",";
-		result += "Num Write after Cond Write In Else" + ",";
-		result += "Num Total Method Calls In Else" + ",";
-		result += "Num Unique Method Calls In Else";
+		result += "Filename" + delimiter;
+		result += "Method"+ delimiter;
+		result += "Condition" + delimiter;
+		result += "Num Statements" + delimiter;
+		result += "Num Statements In Then" + delimiter;
+		result += "Num Statements In Else" + delimiter;
+		result += "Num Nested If Statements" + delimiter;
+		result += "Nesting Level" + delimiter;
+		result += "In Loop" + delimiter;
+		result += "Num Comparisons" + delimiter;
+		result += "Num If Containers" + delimiter;
+		result += "Variables Read In Condition" + delimiter;
+		result += "Variables Written In Condition" + delimiter;
+		result += "Literals Read In Condition" + delimiter;
+		result += "Literals Written In Condition" + delimiter;
+		result += "Variables Method Calls In Condition" + delimiter;
+		result += "Unique Variables Read In Condition" + delimiter;
+		result += "Unique Variables Written In Condition" + delimiter;
+		result += "Unique Literals Read In Condition" + delimiter;
+		result += "Unique Literals Written In Condition" + delimiter;
+		result += "Unique Variables Method Calls In Condition" + delimiter;
+		result += "Total Reads In Then: " + delimiter;
+		result += "Statements Containing a Read In Then" + delimiter;
+		result += "Total Writes In Then" + delimiter;
+		result += "Read after Cond Read In Then" + delimiter;
+		result += "Write after Cond Read In Then" + delimiter;
+		result += "Read after Cond Write In Then" + delimiter;
+		result += "Write after Cond Write In Then" + delimiter;
+		result += "Total Method Calls In Then" + delimiter;
+		result += "Statements Containing a Method Call In Then" + delimiter;
+		result += "Total Reads In Else" + delimiter;
+		result += "Statements Containing a Read In Else" + delimiter;
+		result += "Total Writes In Else" + delimiter;
+		result += "Read after Cond Read In Else" + delimiter;
+		result += "Write after Cond Read In Else" + delimiter;
+		result += "Read after Cond Write In Else" + delimiter;
+		result += "Write after Cond Write In Else" + delimiter;
+		result += "Total Method Calls In Else" + delimiter;
+		result += "Statements Containing a Method Call In Else" + "\n";
 		return result;
     }
     

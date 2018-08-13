@@ -39,6 +39,10 @@ public final class LoopRegion extends AbstractRegion {
 		this.condition = IfCondition.fromIfBlock(header);
 		this.conditionAtEnd = reversed;
 	}
+	
+	public BlockNode getPreCondition() {
+		return preCondition;
+	}
 
 	public LoopInfo getInfo() {
 		return info;

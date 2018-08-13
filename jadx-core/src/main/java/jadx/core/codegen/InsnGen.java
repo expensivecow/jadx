@@ -433,6 +433,11 @@ public class InsnGen {
 
 	void getMethodArgumentVariables(InsnVariableContainer vc, InsnNode insn, int startArgNum, @Nullable MethodNode callMth) throws CodegenException {
 		int k = startArgNum;
+		
+		if (callMth != null) {
+			vc.addMethodCall(new MethodCall(callMth.getMethodInfo(), callMth.getParentClass().getClassInfo()));
+		}
+		
 		if (callMth != null && callMth.contains(AFlag.SKIP_FIRST_ARG)) {
 			k++;
 		}

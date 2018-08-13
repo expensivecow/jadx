@@ -44,13 +44,19 @@ import jadx.core.utils.exceptions.JadxRuntimeException;
 public class RegionGen extends InsnGen {
 	private static final Logger LOG = LoggerFactory.getLogger(RegionGen.class);
 	private List<IBlock> blocks;
+	private List<IfCondition> conditions;
+	private List<LoopRegion> loops;
 	private List<IfRegionInfo> ifRegionInfo;
+	private List<SwitchRegion> switchRegions;
 	private int numNestedIfConditions;
 	
 	public RegionGen(MethodGen mgen) {
 		super(mgen, false);
 		blocks = new ArrayList<IBlock>();
 		ifRegionInfo = new ArrayList<IfRegionInfo>();
+		conditions = new ArrayList<IfCondition>();
+		switchRegions = new ArrayList<SwitchRegion>();
+		loops = new ArrayList<LoopRegion>();
 		numNestedIfConditions = 0;
 	}
 
@@ -64,7 +70,7 @@ public class RegionGen extends InsnGen {
 				declareVars(code, cont);
 				if (cont instanceof IfRegion) {
 					makeIf((IfRegion) cont, code, true);
-					//if (mgen.getMethodNode().getMethodInfo().getFullName().contains("android.support.v4.app.DialogFragment.dismissInternal")) {
+					//if (mgen.getMethodNode().getMethodInfo().getFullName().contains("run")) {
 						IfRegion ifRegion = (IfRegion) cont;
 						FeatureAnalysis.getInstance().addStatistic(mgen, ifRegion, this);
 					//}
@@ -89,14 +95,33 @@ public class RegionGen extends InsnGen {
 		return blocks;
 	}
 	
+	public List<IfCondition> getConditionsForRegion(IContainer cont) throws CodegenException {
+		conditions.clear();
+		traverseRegion(cont);
+		return conditions;
+	}
+	
+	public List<LoopRegion> getLoopsForRegion(IContainer cont) throws CodegenException {
+		loops.clear();
+		traverseRegion(cont);
+		return loops;
+	}
+	
 	public int getNumNestedIfConditions(IContainer cont) throws CodegenException {
 		numNestedIfConditions = 0;
 		traverseRegion(cont);
 		return numNestedIfConditions;
 	}
 	
+	public List<SwitchRegion> getSwitchRegion(IContainer cont) throws CodegenException {
+		switchRegions.clear();
+		traverseRegion(cont);
+		return switchRegions;
+	}
+	
 	public void traverseRegion(IContainer cont) throws CodegenException {
 		if (cont instanceof IBlock) {
+			//System.out.println(((IBlock) cont).getInstructions());
 			blocks.add((IBlock) cont);
 		} else if (cont instanceof IRegion) {
 			if (cont instanceof Region) {
@@ -107,10 +132,14 @@ public class RegionGen extends InsnGen {
 			} else {
 				if (cont instanceof IfRegion) {
 					numNestedIfConditions++;
+
+					conditions.add(((IfRegion) cont).getCondition());
 					traverseIf((IfRegion) cont, true);
 				} else if (cont instanceof SwitchRegion) {
 					traverseSwitch((SwitchRegion) cont);
+					switchRegions.add((SwitchRegion) cont);
 				} else if (cont instanceof LoopRegion) {
+					loops.add((LoopRegion) cont);
 					traverseLoop((LoopRegion) cont);
 				} else if (cont instanceof TryCatchRegion) {
 					traverseTryCatch((TryCatchRegion) cont);
@@ -141,6 +170,7 @@ public class RegionGen extends InsnGen {
 			if (subBlocks.size() == 1) {
 				IContainer elseBlock = subBlocks.get(0);
 				if (elseBlock instanceof IfRegion) {
+					conditions.add(((IfRegion) elseBlock).getCondition());
 					traverseIf((IfRegion) elseBlock, false);
 					return true;
 				}
@@ -285,7 +315,7 @@ public class RegionGen extends InsnGen {
 		code.decIndent();
 	}
 
-	private void makeSimpleBlock(IBlock block, CodeWriter code) throws CodegenException {
+	public void makeSimpleBlock(IBlock block, CodeWriter code) throws CodegenException {
 		for (InsnNode insn : block.getInstructions()) {
 			if (!insn.contains(AFlag.SKIP)) {
 				makeInsn(insn, code);
@@ -427,7 +457,6 @@ public class RegionGen extends InsnGen {
 		addArg(code, arg, false);
 		code.add(") {");
 		code.incIndent();
-
 		int size = sw.getKeys().size();
 		for (int i = 0; i < size; i++) {
 			List<Object> keys = sw.getKeys().get(i);

@@ -19,6 +19,8 @@ public class Statistic {
 	private int numNestedIfStatements;
 	private int nestingLevel;
 	private int numIfContainers;
+	private int numStatementsInThen;
+	private int numStatementsInElse;
 	
 	private int numTotalReadsInThen;
 	private int numTotalUniqueReadsInThen;
@@ -95,7 +97,11 @@ public class Statistic {
 	private int numTotalMethodCallsInThen;
 	private int numUniqueMethodCallsInThen;
 	 */
+	public int getNumStatementsInThen() { return numStatementsInThen; }
+	public int getNumStatementsInElse() { return numStatementsInElse; }
 	public void setNumStatements(int numStatements) { this.numStatements = numStatements; }
+	public void setNumStatementsInThen(int numStatementsInThen) { this.numStatementsInThen = numStatementsInThen; }
+	public void setNumStatementsInElse(int numStatementsInElse) { this.numStatementsInElse = numStatementsInElse; }
 	public void setInLoop(boolean inLoop) { this.inLoop = inLoop; }
 	public void setNumNestedIfStatements(int numNestedIfStatements) { this.numNestedIfStatements = numNestedIfStatements; }
 	public void setNestingLevel(int nestingLevel) { this.nestingLevel = nestingLevel; }
@@ -170,7 +176,7 @@ public class Statistic {
 		return result;
 	}
 	
-	public String getStats() {
+	public String getStats(String delimiter) {
 		String methodName = mth.getMethodNode().getMethodInfo().getFullName();
 		methodName += "(" + mth.getMethodNode().getMethodInfo().getArgumentsTypes();
 		methodName = methodName.replace("[", "");
@@ -178,41 +184,43 @@ public class Statistic {
 		methodName += ")";
 		
 		String result = "";
-		result += methodName + ", ";
-		result += conditionString + ", ";
-		result += numStatements + ", ";
-		result += numNestedIfStatements + ", ";
-		result += nestingLevel + ", ";
-		result += inLoop + ", ";
-		result += comparisons.size() + ", ";
-		result += numIfContainers + ", ";
-		result += readVarInCond.size() + ", ";
-		result += writeVarInCond.size() + ", ";
-		result += readLitInCond.size() + ", ";
-		result += writeLitInCond.size() + ", ";
-		result += methodCallsInCond.size() + ", ";
-		result += uniqueReadVarInCond.size() + ", ";
-		result += uniqueWriteVarInCond.size() + ", ";
-		result += uniqueReadLitInCond.size() + ", ";
-		result += uniqueWriteLitInCond.size() + ", ";
-		result += uniqueMethodCallsInCond.size() + ", ";
-		result += numTotalReadsInThen + ", ";
-		result += numTotalUniqueReadsInThen + ", ";
-		result += numTotalWritesInThen + ", ";
-		result += numTotalReadReadInThen + ", ";
-		result += numTotalReadWriteInThen + ", ";
-		result += numTotalWriteReadInThen + ", ";
-		result += numTotalWriteWriteInThen + ", ";
-		result += numTotalMethodCallsInThen + ", ";
-		result += numUniqueMethodCallsInThen + ", ";
-		result += numTotalReadsInElse + ", ";
-		result += numTotalUniqueReadsInElse + ", ";
-		result += numTotalWritesInElse + ", ";
-		result += numTotalReadReadInElse + ", ";
-		result += numTotalReadWriteInElse + ", ";
-		result += numTotalWriteReadInElse + ", ";
-		result += numTotalWriteWriteInElse + ", ";
-		result += numTotalMethodCallsInElse + ", ";
+		result += methodName + delimiter;
+		result += conditionString.replace('\'', '\'') + delimiter;
+		result += numStatements + delimiter;
+		result += numStatementsInThen + delimiter;
+		result += numStatementsInElse + delimiter;
+		result += numNestedIfStatements + delimiter;
+		result += nestingLevel + delimiter;
+		result += inLoop + delimiter;
+		result += comparisons.size() + delimiter;
+		result += numIfContainers + delimiter;
+		result += readVarInCond.size() + delimiter;
+		result += writeVarInCond.size() + delimiter;
+		result += readLitInCond.size() + delimiter;
+		result += writeLitInCond.size() + delimiter;
+		result += methodCallsInCond.size() + delimiter;
+		result += uniqueReadVarInCond.size() + delimiter;
+		result += uniqueWriteVarInCond.size() + delimiter;
+		result += uniqueReadLitInCond.size() + delimiter;
+		result += uniqueWriteLitInCond.size() + delimiter;
+		result += uniqueMethodCallsInCond.size() + delimiter;
+		result += numTotalReadsInThen + delimiter;
+		result += numTotalUniqueReadsInThen + delimiter;
+		result += numTotalWritesInThen + delimiter;
+		result += numTotalReadReadInThen + delimiter;
+		result += numTotalReadWriteInThen + delimiter;
+		result += numTotalWriteReadInThen + delimiter;
+		result += numTotalWriteWriteInThen + delimiter;
+		result += numTotalMethodCallsInThen + delimiter;
+		result += numUniqueMethodCallsInThen + delimiter;
+		result += numTotalReadsInElse + delimiter;
+		result += numTotalUniqueReadsInElse + delimiter;
+		result += numTotalWritesInElse + delimiter;
+		result += numTotalReadReadInElse + delimiter;
+		result += numTotalReadWriteInElse + delimiter;
+		result += numTotalWriteReadInElse + delimiter;
+		result += numTotalWriteWriteInElse + delimiter;
+		result += numTotalMethodCallsInElse + delimiter;
 		result += numUniqueMethodCallsInElse + "\n";
 		return result;
 	}

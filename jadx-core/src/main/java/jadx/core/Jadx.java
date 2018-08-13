@@ -73,7 +73,7 @@ public class Jadx {
 				passes.add(DotGraphVisitor.dumpRaw());
 			}
 
-			//passes.add(new ConstInlineVisitor());
+			passes.add(new ConstInlineVisitor());
 			passes.add(new FinishTypeInference());
 			passes.add(new EliminatePhiNodes());
 
